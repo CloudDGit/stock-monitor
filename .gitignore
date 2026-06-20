@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# 虚拟环境
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 日志
+*.log
+debug.log
+
+# 数据文件（本地配置和持仓数据不提交）
+config.json
+positions.json
+stocks.json
+
+# 系统文件
+nul
+Thumbs.db
+.DS_Store
