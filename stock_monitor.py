@@ -1969,23 +1969,25 @@ class StealthStockMonitor(QMainWindow):
         # 底部状态栏
         status_bar_widget = QWidget()
         status_bar_widget.setStyleSheet("background-color: #f0f0f0; border-top: 1px solid #d0d0d0;")
+        status_bar_widget.setMinimumHeight(36)
         status_bar_layout = QHBoxLayout(status_bar_widget)
-        status_bar_layout.setContentsMargins(5, 3, 5, 3)
-        
+        status_bar_layout.setContentsMargins(10, 6, 10, 6)
+        status_bar_layout.setSpacing(15)
+
         self.market_status_label = QLabel("● 交易中")
-        self.market_status_label.setStyleSheet("color: #4caf50; font-size: 10px;")
+        self.market_status_label.setStyleSheet("color: #4caf50; font-size: 13px;")
         status_bar_layout.addWidget(self.market_status_label)
-        
+
         self.last_update_label = QLabel("最后更新: --:--:--")
-        self.last_update_label.setStyleSheet("color: #666; font-size: 10px;")
+        self.last_update_label.setStyleSheet("color: #666; font-size: 13px;")
         status_bar_layout.addWidget(self.last_update_label)
-        
+
         status_bar_layout.addStretch()
-        
+
         self.stock_count_label = QLabel(f"共 {len(self.stocks)} 只股票")
-        self.stock_count_label.setStyleSheet("color: #666; font-size: 10px;")
+        self.stock_count_label.setStyleSheet("color: #666; font-size: 13px;")
         status_bar_layout.addWidget(self.stock_count_label)
-        
+
         main_layout.addWidget(status_bar_widget)
         
         # 创建系统托盘
