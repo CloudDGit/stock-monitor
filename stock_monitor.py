@@ -1862,7 +1862,7 @@ class StealthStockMonitor(QMainWindow):
                 border: 1px solid #ccc;
                 border-radius: 2px;
                 padding: 4px 10px;
-                font-size: 11px;
+                font-size: 13px;
                 min-width: 60px;
             }
             QPushButton:hover {
@@ -1936,7 +1936,7 @@ class StealthStockMonitor(QMainWindow):
         
         # 状态显示
         self.status_label = QLabel("就绪")
-        self.status_label.setStyleSheet("color: #666; font-size: 11px;")
+        self.status_label.setStyleSheet("color: #333; font-size: 13px; font-weight: bold;")
         toolbar_layout.addWidget(self.status_label)
         
         main_layout.addLayout(toolbar_layout)
@@ -2246,7 +2246,7 @@ class StealthStockMonitor(QMainWindow):
         """更新底部汇总信息"""
         summary_text = f"总市值: {market_value:,.0f} | 总盈亏: {profit_loss:+,.0f} | 今日盈亏: {today_profit:+,.0f}"
         self.status_label.setText(summary_text)
-        self.status_label.setStyleSheet("color: #333; font-size: 11px; font-weight: bold;")
+        self.status_label.setStyleSheet("color: #333; font-size: 13px; font-weight: bold;")
     
     def start_data_fetcher(self):
         """启动数据获取器"""
