@@ -1693,6 +1693,10 @@ class StealthStockMonitor(QMainWindow):
         self._minute_data_cache = {}  # 分时数据缓存 {code: minute_data}
         self._minute_data_fetching = set()  # 正在获取分时数据的股票code集合
         self._minute_data_cache_date = datetime.now().strftime('%Y%m%d')  # 缓存日期，用于判断是否需要刷新
+        # 分时图定时刷新器 - 每60秒更新一次
+        self._minute_refresh_timer = QTimer(self)
+        self._minute_refresh_timer.timeout.connect(self._refresh_all_minute_charts)
+        self._minute_refresh_timer.start(60 * 1000)  # 1分钟
         self.data_fetcher = None
         self.current_chart_stock = None  # 当前在走势图中显示的股票代码
         self.position_manager = PositionManager()  # 持仓管理器
@@ -2330,6 +2334,52 @@ class StealthStockMonitor(QMainWindow):
                     self._minute_data_fetching.discard(code)
 
         threading.Thread(target=_do_batch, daemon=True).start()
+
+    def _refresh_all_minute_charts(self):
+        """定时刷新所有分时图（每1分钟），让盘中分时图随时间逐步更新"""
+        # 非交易时间不刷新
+        now = datetime.now()
+        # 周末不刷新
+        if now.weekday() >= 5:
+            return
+        hour, minute = now.hour, now.minute
+        # 9:30-11:30, 13:00-15:00 之间才刷新
+        is_morning = (hour == 9 and minute >= 30) or (hour == 10) or (hour == 11 and minute <= 30)
+        is_afternoon = (hour == 13) or (hour == 14) or (hour == 15 and minute == 0)
+        if not (is_morning or is_afternoon):
+            return
+
+        # 重新获取所有股票的分时数据
+        for code, name in self.stocks:
+            # 跳过正在获取的
+            if code in self._minute_data_fetching:
+                continue
+            self._minute_data_fetching.add(code)
+            mini_chart = self.excel_table._mini_charts.get(code) if hasattr(self.excel_table, '_mini_charts') else None
+
+            def _do_fetch(c=code, n=name, mc=mini_chart):
+                try:
+                    data = self._generate_simulated_minute_data(c, n)
+                    if data:
+                        self._minute_data_cache[c] = data
+                        # 更新迷你分时图
+                        if mc:
+                            try:
+                                prices = [d['price'] for d in data]
+                                prev_close = data[0].get('prev_close', prices[0] if prices else 0)
+                                QTimer.singleShot(0, lambda: mc.set_data(prices, prev_close))
+                            except Exception:
+                                pass
+                        # 更新全屏分时图（如果当前显示的就是这只股票）
+                        if self.current_chart_stock == c:
+                            real_data = self.stock_data.get(c, None)
+                            QTimer.singleShot(0, lambda: self.chart_widget.set_minute_data(data, real_data))
+                except Exception as e:
+                    print(f"定时刷新{c}分时数据失败: {e}")
+                finally:
+                    self._minute_data_fetching.discard(c)
+
+            threading.Thread(target=_do_fetch, daemon=True).start()
 
     def on_stock_double_clicked(self, code, name):
         """处理双击股票事件 - 切换到分时图标签页"""
