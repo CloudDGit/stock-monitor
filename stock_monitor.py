@@ -3034,7 +3034,7 @@ class StealthStockMonitor(QMainWindow):
             
             self.positions[code]['quantity'] = total_quantity
             self.positions[code]['cost_price'] = new_cost
-            self.positions[code]['is_today_added'] = True
+            # 追加买入不改变 is_today_added，保留原值
         else:
             # 不存在，新建记录
             self.stocks.append((code, name))
@@ -3062,8 +3062,15 @@ class StealthStockMonitor(QMainWindow):
                 self.positions[code]['market_value'] = current_qty * realtime_price
                 self.positions[code]['total_profit'] = (realtime_price - current_cost) * current_qty
                 self.positions[code]['total_profit_percent'] = ((realtime_price - current_cost) / current_cost) * 100
-                self.positions[code]['today_profit'] = self.positions[code]['total_profit']
-                self.positions[code]['today_profit_percent'] = self.positions[code]['total_profit_percent']
+                
+                is_today_added = self.positions[code].get('is_today_added', False)
+                if is_today_added:
+                    self.positions[code]['today_profit'] = self.positions[code]['total_profit']
+                    self.positions[code]['today_profit_percent'] = self.positions[code]['total_profit_percent']
+                else:
+                    change = self.stock_data[code].get('change', 0)
+                    self.positions[code]['today_profit'] = change * current_qty
+                    self.positions[code]['today_profit_percent'] = self.stock_data[code].get('change_percent', 0)
         
         self.save_stocks()
         self.save_positions()
