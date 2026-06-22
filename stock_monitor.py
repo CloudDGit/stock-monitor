@@ -118,13 +118,25 @@ def compute_position_profit(code, position, stock_data_entry):
         today_profit = position.get('today_profit', 0)
         today_profit_pct = position.get('today_profit_percent', 0)
 
-        # 如果导入文件中没有盈亏数据（某些持仓手动添加的情况），才用公式兜底
+        # 如果导入文件中没有总盈亏数据，用公式计算
         if quantity > 0 and cost_price > 0 and current_price > 0:
-            if total_profit == 0 and today_profit == 0:
+            if total_profit == 0:
                 total_profit = (current_price - cost_price) * quantity
                 total_profit_pct = (total_profit / (cost_price * quantity)) * 100 if cost_price * quantity > 0 else 0
-                today_profit = total_profit if position.get('is_today_added', False) else (change * quantity if change != 0 else 0)
-                today_profit_pct = total_profit_pct if position.get('is_today_added', False) else change_percent
+            
+            # 如果当日盈亏为0但有行情数据，用公式计算（基于昨收价）
+            if today_profit == 0:
+                is_today_added = position.get('is_today_added', False)
+                if is_today_added:
+                    today_profit = total_profit
+                    today_profit_pct = total_profit_pct
+                else:
+                    if prev_close > 0 and current_price > 0:
+                        change_val = current_price - prev_close
+                    else:
+                        change_val = change
+                    today_profit = change_val * quantity if quantity > 0 else 0
+                    today_profit_pct = change_percent
 
         return {
             'quantity': quantity,
