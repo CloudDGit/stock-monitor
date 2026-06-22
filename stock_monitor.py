@@ -84,7 +84,11 @@ def compute_position_profit(code, position, stock_data_entry):
             current_price = rt_price
         change = stock_data_entry.get('change', 0)
         change_percent = stock_data_entry.get('change_percent', 0)
-        if current_price > 0 and change != 0:
+        # 优先从行情数据获取昨收价（更准确）
+        rt_prev_close = stock_data_entry.get('prev_close', 0)
+        if rt_prev_close > 0:
+            prev_close = rt_prev_close
+        elif current_price > 0 and change != 0:
             prev_close = current_price - change
 
     is_sold = position.get('is_sold', False)
