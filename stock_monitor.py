@@ -1692,6 +1692,7 @@ class StealthStockMonitor(QMainWindow):
         self.stock_data = {}  # 存储股票数据
         self._minute_data_cache = {}  # 分时数据缓存 {code: minute_data}
         self._minute_data_fetching = set()  # 正在获取分时数据的股票code集合
+        self._minute_data_cache_date = datetime.now().strftime('%Y%m%d')  # 缓存日期，用于判断是否需要刷新
         self.data_fetcher = None
         self.current_chart_stock = None  # 当前在走势图中显示的股票代码
         self.position_manager = PositionManager()  # 持仓管理器
@@ -2123,6 +2124,11 @@ class StealthStockMonitor(QMainWindow):
                     placeholder = NumericTableWidgetItem("")
                     placeholder.setData(Qt.UserRole, 0)
                     self.excel_table.setItem(row, 1, placeholder)
+                    # 检查是否需要刷新分时数据缓存（新的一天）
+                    today = datetime.now().strftime('%Y%m%d')
+                    if self._minute_data_cache_date != today:
+                        self._minute_data_cache = {}
+                        self._minute_data_cache_date = today
                     # 使用缓存的分时数据，避免每次刷新都发起HTTP请求
                     minute_data = self._minute_data_cache.get(code)
                     if minute_data is None:
@@ -2337,6 +2343,12 @@ class StealthStockMonitor(QMainWindow):
         self.chart_widget.stock_code = code
         self.chart_widget.stock_name = name
 
+        # 检查是否需要刷新分时数据缓存（新的一天）
+        today = datetime.now().strftime('%Y%m%d')
+        if self._minute_data_cache_date != today:
+            self._minute_data_cache = {}
+            self._minute_data_cache_date = today
+
         # 优先使用缓存的分时数据，避免阻塞UI
         minute_data = self._minute_data_cache.get(code)
         if minute_data is None:
@@ -2461,8 +2473,9 @@ class StealthStockMonitor(QMainWindow):
         all_times = morning + afternoon
         n_points = len(all_times)  # 241
 
-        # 固定种子用股票代码，保证同一股票走势一致
-        random.seed(hash(code) % 100000)
+        # 使用股票代码+当前日期作为种子，保证每天数据一致，但每天会更新
+        today_seed = hash(code + datetime.now().strftime('%Y%m%d')) % 100000
+        random.seed(today_seed)
 
         # 目标总变化量
         target_delta = current_price - prev_close
