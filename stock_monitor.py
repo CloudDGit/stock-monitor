@@ -110,7 +110,7 @@ def compute_position_profit(code, position, stock_data_entry):
 
     in_trading = is_trading_time()
 
-    # -------- 规则 2：非交易时间，使用导入的原始盈亏数据 --------
+    # -------- 规则 2：非交易时间，优先使用实时行情重新计算 --------
     if not in_trading:
         market_value = position.get('market_value', 0.0)
         total_profit = position.get('total_profit', 0)
@@ -118,25 +118,24 @@ def compute_position_profit(code, position, stock_data_entry):
         today_profit = position.get('today_profit', 0)
         today_profit_pct = position.get('today_profit_percent', 0)
 
-        # 如果导入文件中没有总盈亏数据，用公式计算
+        # 如果有实时行情数据，用公式重新计算（确保价格变化后盈亏同步更新）
         if quantity > 0 and cost_price > 0 and current_price > 0:
-            if total_profit == 0:
-                total_profit = (current_price - cost_price) * quantity
-                total_profit_pct = (total_profit / (cost_price * quantity)) * 100 if cost_price * quantity > 0 else 0
+            # 重新计算总盈亏
+            total_profit = (current_price - cost_price) * quantity
+            total_profit_pct = (total_profit / (cost_price * quantity)) * 100 if cost_price * quantity > 0 else 0
             
-            # 如果当日盈亏为0但有行情数据，用公式计算（基于昨收价）
-            if today_profit == 0:
-                is_today_added = position.get('is_today_added', False)
-                if is_today_added:
-                    today_profit = total_profit
-                    today_profit_pct = total_profit_pct
+            # 重新计算当日盈亏
+            is_today_added = position.get('is_today_added', False)
+            if is_today_added:
+                today_profit = total_profit
+                today_profit_pct = total_profit_pct
+            else:
+                if prev_close > 0 and current_price > 0:
+                    change_val = current_price - prev_close
                 else:
-                    if prev_close > 0 and current_price > 0:
-                        change_val = current_price - prev_close
-                    else:
-                        change_val = change
-                    today_profit = change_val * quantity if quantity > 0 else 0
-                    today_profit_pct = change_percent
+                    change_val = change
+                today_profit = change_val * quantity if quantity > 0 else 0
+                today_profit_pct = change_percent
 
         return {
             'quantity': quantity,
