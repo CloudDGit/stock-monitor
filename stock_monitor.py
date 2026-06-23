@@ -2574,6 +2574,31 @@ class StealthStockMonitor(QMainWindow):
         all_times = morning + afternoon
         n_points = len(all_times)  # 241
 
+        # 只生成到当前时间为止的数据点（盘中逐步增长）
+        now = datetime.now()
+        current_hour_min = now.hour * 60 + now.minute
+        # 9:30 = 570, 11:30 = 690, 13:00 = 780, 15:00 = 900
+        if current_hour_min < 570:
+            # 开盘前，不生成数据
+            return []
+        elif current_hour_min <= 690:
+            # 上午交易时间
+            elapsed = current_hour_min - 570  # 从9:30开始的分钟数
+            n_points = min(elapsed + 1, 121)
+            all_times = morning[:n_points]
+        elif current_hour_min < 780:
+            # 午间休市，显示上午全部数据
+            n_points = 121
+            all_times = morning
+        elif current_hour_min <= 900:
+            # 下午交易时间
+            afternoon_elapsed = current_hour_min - 780  # 从13:00开始的分钟数
+            n_points = 121 + min(afternoon_elapsed + 1, 120)
+            all_times = morning + afternoon[:min(afternoon_elapsed + 1, 120)]
+        else:
+            # 收盘后，显示全天数据
+            pass
+
         # 使用股票代码+当前日期作为种子，保证每天数据一致，但每天会更新
         today_seed = hash(code + datetime.now().strftime('%Y%m%d')) % 100000
         random.seed(today_seed)
@@ -2594,14 +2619,16 @@ class StealthStockMonitor(QMainWindow):
         max_price = prev_close + display_range
         min_price = prev_close - display_range
 
-        # 生成布朗运动噪声
+        # 生成全天布朗运动噪声（241点），再截取到当前时间，保证早期点一致
+        full_n = 241
         volatility = display_range * 0.15  # 波动幅度为显示范围的15%
-        noise = []
+        full_noise = []
         current_noise = 0.0
-        for i in range(n_points):
+        for i in range(full_n):
             current_noise += random.gauss(0, volatility * 0.3)
             current_noise *= 0.98  # 噪声回归，避免漂移过远
-            noise.append(current_noise)
+            full_noise.append(current_noise)
+        noise = full_noise[:n_points]
 
         # 构造价格 = 趋势线 + 噪声
         # 趋势线：从 prev_close 到 current_price 的平滑过渡
@@ -2630,10 +2657,10 @@ class StealthStockMonitor(QMainWindow):
             prices[0] = round(prev_close, 3)
             prices[-1] = round(current_price, 3)
 
-        # 生成成交量（开盘和尾盘较大，中间较小）
-        volumes = []
-        for i in range(n_points):
-            t_ratio = i / n_points
+        # 生成成交量（全天241点，再截取到当前时间）
+        full_volumes = []
+        for i in range(full_n):
+            t_ratio = i / full_n
             if t_ratio < 0.15 or t_ratio > 0.85:
                 time_factor = 1.5 + random.random() * 0.5
             elif t_ratio < 0.3 or t_ratio > 0.7:
@@ -2643,7 +2670,8 @@ class StealthStockMonitor(QMainWindow):
 
             base_vol = 5000 * (prev_close / 10.0)
             v = int(base_vol * time_factor * (0.5 + random.random()))
-            volumes.append(v)
+            full_volumes.append(v)
+        volumes = full_volumes[:n_points]
 
         # 组装数据
         data = []
@@ -3019,8 +3047,13 @@ class StealthStockMonitor(QMainWindow):
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         
-        # 当代码输入改变时，自动获取名称
-        code_input.textChanged.connect(lambda: self.auto_fetch_name(code_input.text(), name_input))
+        # 当代码输入改变时，自动获取名称（带防抖）
+        self._buy_code_timer = QTimer(self)
+        self._buy_code_timer.setSingleShot(True)
+        self._buy_code_timer.timeout.connect(lambda: self.auto_fetch_name(code_input.text(), name_input))
+        code_input.textChanged.connect(lambda: self._buy_code_timer.start(500))
+        # 按回车或失去焦点时也触发获取
+        code_input.editingFinished.connect(lambda: self.auto_fetch_name(code_input.text(), name_input))
         
         dialog.exec_()
     
