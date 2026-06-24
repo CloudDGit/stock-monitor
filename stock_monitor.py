@@ -3179,14 +3179,34 @@ class StealthStockMonitor(QMainWindow):
         exists = any(c == code for c, _ in self.stocks)
         
         if exists:
-            # 已存在，追加买入，加权平均计算成本
+            # 已存在，追加买入（包括清仓后再买入的情况）
             old_quantity = self.positions[code].get('quantity', 0)
             old_cost = self.positions[code].get('cost_price', 0)
-            
+
+            # 关键修复：如果是清仓后反手买回，清除 is_sold 标记并重置盈亏数据
+            if self.positions[code].get('is_sold', False):
+                self.positions[code]['is_sold'] = False
+                # 重新建仓视为今日新增
+                self.positions[code]['is_today_added'] = True
+                self.positions[code]['today_added_date'] = datetime.now().strftime('%Y-%m-%d')
+                self._today_added_codes.add(code)
+                # 重置之前锁定的盈亏数据
+                self.positions[code]['total_profit'] = 0.0
+                self.positions[code]['today_profit'] = 0.0
+                self.positions[code]['total_profit_percent'] = 0.0
+                self.positions[code]['today_profit_percent'] = 0.0
+                # prev_close 用买入价，兼容反T场景
+                self.positions[code]['prev_close'] = price
+                # 清除之前的今日买卖记录
+                if 'today_bought_quantity' in self.positions[code]:
+                    del self.positions[code]['today_bought_quantity']
+                if 'today_bought_cost' in self.positions[code]:
+                    del self.positions[code]['today_bought_cost']
+
             total_cost = (old_quantity * old_cost) + actual_cost
             total_quantity = old_quantity + quantity
             new_cost = total_cost / total_quantity
-            
+
             self.positions[code]['quantity'] = total_quantity
             self.positions[code]['cost_price'] = new_cost
             # 记录当日追加买入的数量和成本（用于计算当日盈亏）
@@ -3420,16 +3440,45 @@ class StealthStockMonitor(QMainWindow):
             QMessageBox.information(self, "成功", message)
         else:
             # 部分卖出，更新持仓数量
-            self.positions[code]['quantity'] = current_quantity - quantity
-            
+            new_quantity = current_quantity - quantity
+            self.positions[code]['quantity'] = new_quantity
+
+            # 追踪当日卖出量（用于正确计算当日盈亏）
+            today_sold_qty = self.positions[code].get('today_sold_quantity', 0)
+            self.positions[code]['today_sold_quantity'] = today_sold_qty + quantity
+
             # 重新计算市值和盈亏
             current_price = self.positions[code].get('current_price', 0)
             if current_price > 0:
-                new_qty = self.positions[code]['quantity']
-                self.positions[code]['market_value'] = new_qty * current_price
-                self.positions[code]['total_profit'] = (current_price - cost_price) * new_qty
-                self.positions[code]['total_profit_percent'] = ((current_price - cost_price) / cost_price) * 100
-            
+                self.positions[code]['market_value'] = new_quantity * current_price
+                self.positions[code]['total_profit'] = (current_price - cost_price) * new_quantity
+                self.positions[code]['total_profit_percent'] = ((current_price - cost_price) / cost_price) * 100 if cost_price > 0 else 0
+
+                # 重新计算当日盈亏：已实现T+0收益 + 剩余仓的当日浮动盈亏
+                is_today_added = self.positions[code].get('is_today_added', False)
+                today_bought_qty = self.positions[code].get('today_bought_quantity', 0)
+                today_bought_cost = self.positions[code].get('today_bought_cost', 0)
+                total_today_bought = today_bought_qty
+                total_today_sold = today_sold_qty + quantity
+                remaining_from_today = max(0, total_today_bought - total_today_sold)
+                old_qty = new_quantity - remaining_from_today
+
+                if is_today_added and total_today_bought > 0 and today_bought_cost > 0:
+                    # 今日新增仓或追加买入：已实现 + 剩余浮动
+                    realized = (price - today_bought_cost) * min(quantity, total_today_bought) - sell_fees['total_fees']
+                    if prev_close > 0:
+                        remaining_today_profit = (current_price - prev_close) * new_quantity
+                    else:
+                        remaining_today_profit = (current_price - today_bought_cost) * new_quantity
+                    self.positions[code]['today_profit'] = realized + remaining_today_profit
+                else:
+                    # 普通持仓：当日涨跌额 * 剩余数量
+                    if prev_close > 0:
+                        change_val = current_price - prev_close
+                    else:
+                        change_val = 0
+                    self.positions[code]['today_profit'] = change_val * new_quantity
+
             message = f"已卖出 {quantity} 股 {name}({code})\n"
             message += f"卖出金额: {sell_amount:,.2f}\n"
             message += f"成本金额: {cost_amount:,.2f}\n"
@@ -4265,6 +4314,8 @@ class StealthStockMonitor(QMainWindow):
                     added_date = self.positions[code].get('today_added_date', '')
                     if added_date != today_str_for_check:
                         del self.positions[code]['today_bought_cost']
+                if 'today_sold_quantity' in self.positions[code]:
+                    del self.positions[code]['today_sold_quantity']
             # 清除 is_sold 标记的股票（第二日打开程序时剔除）
             sold_codes = [code for code in self.positions if self.positions[code].get('is_sold', False)]
             for code in sold_codes:
