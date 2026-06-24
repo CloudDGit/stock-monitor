@@ -3201,7 +3201,9 @@ class StealthStockMonitor(QMainWindow):
                 'today_profit_percent': 0.0,
                 'current_price': 0.0,
                 'change_percent': 0.0,
-                'is_today_added': True
+                'is_today_added': True,
+                'today_added_date': datetime.now().strftime('%Y-%m-%d'),
+                'prev_close': price  # 新开仓时prev_close设为买入价，防止is_today_added被清除后当日盈亏计算异常
             }
         
         # 获取实时价格并计算盈亏
@@ -4234,15 +4236,23 @@ class StealthStockMonitor(QMainWindow):
         sold_codes_cleared = False
         if not hasattr(self, '_last_trading_date') or self._last_trading_date != today_str:
             self._last_trading_date = today_str
-            # 清除 is_today_added 标记
+            # 清除 is_today_added 标记（只清除非今天买入的）
+            today_str_for_check = datetime.now().strftime('%Y-%m-%d')
             for code in list(self.positions.keys()):
                 if self.positions[code].get('is_today_added', False):
-                    self.positions[code]['is_today_added'] = False
-                # 清除当日追加买入记录
+                    # 只清除不是今天买入的股票
+                    added_date = self.positions[code].get('today_added_date', '')
+                    if added_date != today_str_for_check:
+                        self.positions[code]['is_today_added'] = False
+                # 清除当日追加买入记录（只清除非今天的）
                 if 'today_bought_quantity' in self.positions[code]:
-                    del self.positions[code]['today_bought_quantity']
+                    added_date = self.positions[code].get('today_added_date', '')
+                    if added_date != today_str_for_check:
+                        del self.positions[code]['today_bought_quantity']
                 if 'today_bought_cost' in self.positions[code]:
-                    del self.positions[code]['today_bought_cost']
+                    added_date = self.positions[code].get('today_added_date', '')
+                    if added_date != today_str_for_check:
+                        del self.positions[code]['today_bought_cost']
             # 清除 is_sold 标记的股票（第二日打开程序时剔除）
             sold_codes = [code for code in self.positions if self.positions[code].get('is_sold', False)]
             for code in sold_codes:
@@ -4276,6 +4286,11 @@ class StealthStockMonitor(QMainWindow):
                 rt_change = info.get('change', 0)
                 if rt_price > 0 and rt_change != 0:
                     position['prev_close'] = rt_price - rt_change
+                elif position.get('prev_close', 0) == 0:
+                    # 如果prev_close仍为0，尝试从行情数据直接获取
+                    rt_prev_close = info.get('prev_close', 0)
+                    if rt_prev_close > 0:
+                        position['prev_close'] = rt_prev_close
                 position['market_value'] = p['market_value']
                 position['total_profit'] = p['total_profit']
                 position['total_profit_percent'] = p['total_profit_percent']
