@@ -1751,6 +1751,7 @@ class StealthStockMonitor(QMainWindow):
         self.data_fetcher = None
         self.current_chart_stock = None  # 当前在走势图中显示的股票代码
         self.position_manager = PositionManager()  # 持仓管理器
+        self._today_added_codes = set()  # 今日买入的股票代码集合，用于可靠追踪当日盈亏
         # 极简模式相关
         self.minimalist_panel = None  # 极简模式面板
         self.mini_float_button = None  # 迷你浮动按钮
@@ -3047,18 +3048,20 @@ class StealthStockMonitor(QMainWindow):
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         
-        # 当代码输入改变时，自动获取名称（带防抖）
-        self._buy_code_timer = QTimer(self)
+        # 当代码输入改变时，自动获取名称（带防抖，同步获取避免线程问题）
+        self._buy_code_timer = QTimer(dialog)
         self._buy_code_timer.setSingleShot(True)
-        self._buy_code_timer.timeout.connect(lambda: self.auto_fetch_name(code_input.text(), name_input))
+        def do_fetch_name():
+            self._do_fetch_name_sync(code_input.text().strip(), name_input)
+        self._buy_code_timer.timeout.connect(do_fetch_name)
         code_input.textChanged.connect(lambda: self._buy_code_timer.start(500))
         # 按回车或失去焦点时也触发获取
-        code_input.editingFinished.connect(lambda: self.auto_fetch_name(code_input.text(), name_input))
+        code_input.editingFinished.connect(lambda: self._do_fetch_name_sync(code_input.text().strip(), name_input))
         
         dialog.exec_()
     
-    def auto_fetch_name(self, code, name_input):
-        """自动获取股票名称（后台异步，不阻塞UI）"""
+    def _do_fetch_name_sync(self, code, name_input):
+        """同步获取股票名称（避免线程+QTimer在模态对话框中的问题）"""
         code = code.strip()
         if not code:
             name_input.clear()
@@ -3067,7 +3070,7 @@ class StealthStockMonitor(QMainWindow):
 
         # 港股代码格式：HK + 5位数字，如 HK2513
         if code.upper().startswith('HK'):
-            if len(code) < 7:  # HK + 至少1位
+            if len(code) < 7:
                 self.fetch_status_label.setText("")
                 return
             query_code = code
@@ -3077,29 +3080,26 @@ class StealthStockMonitor(QMainWindow):
                 return
             query_code = code
 
-        # 显示获取中状态
         self.fetch_status_label.setText("正在获取...")
+        QApplication.processEvents()  # 立即刷新UI
 
-        # 后台异步获取，避免阻塞UI
-        def _do_fetch():
-            try:
-                name = StockInfoFetcher.get_stock_name(query_code)
-                # 回到主线程更新UI
-                def _update_ui():
-                    if name:
-                        name_input.setText(name)
-                        self.fetch_status_label.setText(f"✓ {name}")
-                        self.fetch_status_label.setStyleSheet("color: #4caf50; font-size: 10px;")
-                    else:
-                        self.fetch_status_label.setText("✗ 未找到")
-                        self.fetch_status_label.setStyleSheet("color: #f44336; font-size: 10px;")
-                        name_input.setReadOnly(False)
-                        name_input.setFocus()
-                QTimer.singleShot(0, _update_ui)
-            except Exception:
-                QTimer.singleShot(0, lambda: self.fetch_status_label.setText("✗ 错误"))
+        try:
+            name = StockInfoFetcher.get_stock_name(query_code)
+            if name:
+                name_input.setText(name)
+                self.fetch_status_label.setText(f"✓ {name}")
+                self.fetch_status_label.setStyleSheet("color: #4caf50; font-size: 10px;")
+            else:
+                self.fetch_status_label.setText("✗ 未找到")
+                self.fetch_status_label.setStyleSheet("color: #f44336; font-size: 10px;")
+                name_input.setReadOnly(False)
+        except Exception:
+            self.fetch_status_label.setText("✗ 错误")
+            self.fetch_status_label.setStyleSheet("color: #f44336; font-size: 10px;")
 
-        threading.Thread(target=_do_fetch, daemon=True).start()
+    def auto_fetch_name(self, code, name_input):
+        """自动获取股票名称（保留兼容旧调用）"""
+        self._do_fetch_name_sync(code, name_input)
 
     def calculate_buy_fees(self, quantity, price):
         """计算买入费用"""
@@ -3143,7 +3143,15 @@ class StealthStockMonitor(QMainWindow):
             return
         
         if not name:
-            name = code
+            # 同步获取股票名称（确保在点击OK时一定获取到）
+            try:
+                fetched_name = StockInfoFetcher.get_stock_name(code)
+                if fetched_name:
+                    name = fetched_name
+            except Exception:
+                pass
+            if not name:
+                name = code
         
         try:
             quantity = int(quantity_str.strip())
@@ -3190,6 +3198,7 @@ class StealthStockMonitor(QMainWindow):
         else:
             # 不存在，新建记录
             self.stocks.append((code, name))
+            self._today_added_codes.add(code)  # 记录今日买入
             self.positions[code] = {
                 'name': name,
                 'quantity': quantity,
@@ -4236,14 +4245,17 @@ class StealthStockMonitor(QMainWindow):
         sold_codes_cleared = False
         if not hasattr(self, '_last_trading_date') or self._last_trading_date != today_str:
             self._last_trading_date = today_str
+            # 新交易日：清空今日买入记录
+            self._today_added_codes.clear()
             # 清除 is_today_added 标记（只清除非今天买入的）
             today_str_for_check = datetime.now().strftime('%Y-%m-%d')
             for code in list(self.positions.keys()):
                 if self.positions[code].get('is_today_added', False):
-                    # 只清除不是今天买入的股票
-                    added_date = self.positions[code].get('today_added_date', '')
-                    if added_date != today_str_for_check:
-                        self.positions[code]['is_today_added'] = False
+                    # 使用集合判断更可靠
+                    if code not in self._today_added_codes:
+                        added_date = self.positions[code].get('today_added_date', '')
+                        if added_date != today_str_for_check:
+                            self.positions[code]['is_today_added'] = False
                 # 清除当日追加买入记录（只清除非今天的）
                 if 'today_bought_quantity' in self.positions[code]:
                     added_date = self.positions[code].get('today_added_date', '')
